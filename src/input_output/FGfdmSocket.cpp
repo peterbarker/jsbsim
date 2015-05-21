@@ -256,9 +256,24 @@ string FGfdmSocket::Receive(void)
   }
 
   if (sckt_in > 0) {
-    while ((num_chars = recv(sckt_in, buf, sizeof buf, 0)) > 0) {
-      data.append(buf, num_chars);
-    }
+    do {
+      num_chars = recv(sckt_in, buf, sizeof buf, 0);
+      if (num_chars < 0) {
+        if (errno != EAGAIN && errno != EWOULDBLOCK) {
+          printf("recv failed: %s\n", strerror(errno));
+          // we should probably take more extreme action here....
+          close(sckt_in);
+          sckt_in = -1;
+          return data;
+        }
+      } else if (num_chars == 0) {
+          printf("EOF on sckt_in");
+          sckt_in = -1;
+          return data;
+      } else {
+        data.append(buf, num_chars);
+      }
+    } while(num_chars > 0);
 
 #if defined(_MSC_VER)
     // when nothing received and the error isn't "would block"
@@ -280,12 +295,22 @@ string FGfdmSocket::Receive(void)
 bool FGfdmSocket::Wait(void)
 {
     fd_set fds;
+    fd_set err_fds;
     if (sckt_in <= 0) {
         return false;
     }
     FD_ZERO(&fds);
     FD_SET(sckt_in, &fds);
-    return select(sckt_in+1, &fds, NULL, NULL, NULL) == 1;
+    FD_ZERO(&err_fds);
+    FD_SET(sckt_in, &err_fds);
+    if (select(sckt_in+1, &fds, NULL, &err_fds, NULL) == -1) {
+      return false;
+    }
+    if (FD_ISSET(sckt_in, &err_fds)) {
+      printf("Error on FGfdm socket: %s", strerror(errno));
+      return false;
+    }
+    return true;
 }
 
 //%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
